@@ -22,8 +22,6 @@ export async function initCollection() {
       },
     });
   } catch (error) {
-    // Collection might already exist, which is okay
-    // Check for 409 status (Conflict) or error message indicating collection exists
     if (
       error.status === 409 ||
       (error.data?.status?.error && error.data.status.error.includes("already exists")) ||

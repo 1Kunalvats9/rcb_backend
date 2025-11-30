@@ -6,12 +6,21 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-// Lazy load pdf-parse using dynamic import
+// Lazy load pdf-parse using dynamic import from CommonJS wrapper
 let pdfParsePromise = null;
 async function getPdfParse() {
   if (!pdfParsePromise) {
-    pdfParsePromise = import("pdf-parse").then((module) => {
-      return module.default || module;
+    pdfParsePromise = import("../utils/pdfParser.cjs").then((module) => {
+      // CommonJS modules imported in ES modules have a default property
+      // Try multiple possible locations
+      const pdfParse = module.default || module.default?.default || module;
+      
+      if (typeof pdfParse !== 'function') {
+        console.error('Failed to load pdfParse. Module structure:', Object.keys(module));
+        throw new Error('pdfParse is not a function after import');
+      }
+      
+      return pdfParse;
     });
   }
   return pdfParsePromise;
@@ -48,6 +57,14 @@ export async function pdfIngest(req, res) {
 
     // Extract text
     const pdfParse = await getPdfParse();
+    
+    // Debug: Check if pdfParse is actually a function
+    if (typeof pdfParse !== 'function') {
+      console.error('pdfParse is not a function. Type:', typeof pdfParse);
+      console.error('pdfParse value:', pdfParse);
+      throw new Error(`pdfParse is not a function, got ${typeof pdfParse}`);
+    }
+    
     const pdfData = await pdfParse(req.file.buffer);
     const fullText = pdfData.text?.trim() || "";
     if (!fullText) {

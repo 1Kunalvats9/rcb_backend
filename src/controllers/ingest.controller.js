@@ -42,18 +42,7 @@ export async function ingest(req, res) {
 
 export async function pdfIngest(req, res) {
   try {
-    // Multer handled in route
-    console.log("[PDF Ingest] Request received");
-    console.log("[PDF Ingest] File:", req.file ? {
-      fieldname: req.file.fieldname,
-      originalname: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: req.file.size
-    } : "No file");
-    console.log("[PDF Ingest] User:", req.user);
-    
     if (!req.file) {
-      console.log("[PDF Ingest] No file in request");
       return res.status(400).json({ error: "No PDF file uploaded." });
     }
 
@@ -67,15 +56,12 @@ export async function pdfIngest(req, res) {
     }
 
     // Extract text from PDF
-    console.log("[PDF Ingest] Starting PDF parsing...");
     const pdfParseFn = await getPdfParse();
     const pdfData = await pdfParseFn(req.file.buffer);
-    console.log("[PDF Ingest] PDF parsed successfully");
     const fullText = pdfData.text?.trim() || "";
     if (!fullText) {
       return res.status(400).json({ error: "PDF contains no extractable text." });
     }
-    console.log(`[PDF Ingest] Extracted ${fullText.length} characters from PDF`);
 
     // Chunking
     const CHUNK_SIZE = 1600;
@@ -94,15 +80,12 @@ export async function pdfIngest(req, res) {
     if (chunks.length === 0) {
       return res.status(400).json({ error: "No chunks produced from PDF." });
     }
-    console.log(`[PDF Ingest] Created ${chunks.length} chunks`);
 
     // Create embeddings + points
     const now = Date.now();
     const points = [];
-    console.log("[PDF Ingest] Starting embedding generation...");
 
     for (let i = 0; i < chunks.length; i++) {
-      console.log(`[PDF Ingest] Processing chunk ${i + 1}/${chunks.length}`);
       const vector = await embedText(chunks[i]);
       points.push({
         id: randomUUID(), // Qdrant requires UUID or unsigned integer
@@ -117,15 +100,11 @@ export async function pdfIngest(req, res) {
         },
       });
     }
-    console.log("[PDF Ingest] All embeddings generated");
 
     // Upsert to Qdrant
-    console.log("[PDF Ingest] Upserting to Qdrant...");
     await qdrant.upsert(process.env.COLLECTION_NAME, { points });
-    console.log("[PDF Ingest] Qdrant upsert complete");
 
     // Save metadata
-    console.log("[PDF Ingest] Saving document metadata...");
     const doc = await Document.create({
       userId,
       fileName: req.file.originalname,
@@ -134,7 +113,6 @@ export async function pdfIngest(req, res) {
       uploadedAt: new Date(),
       source: "pdf",
     });
-    console.log("[PDF Ingest] Document saved with ID:", doc._id);
 
     res.json({
       success: true,

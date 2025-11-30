@@ -55,7 +55,7 @@ export async function pdfIngest(req, res) {
     }
 
     // Chunking
-    const CHUNK_SIZE = 800;
+    const CHUNK_SIZE = 1600;
     const CHUNK_OVERLAP = 100;
     const chunks = [];
 

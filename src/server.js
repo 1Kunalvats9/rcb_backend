@@ -12,8 +12,17 @@ mongoose.connect(process.env.MONGO_URI)
 
 
 const app = express();
-app.use(express.json());
+
+// Increase body size limit for PDF uploads
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cors());
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`[Server] ${req.method} ${req.path} at ${new Date().toISOString()}`);
+  next();
+});
 
 app.use("/ingest", ingestRoute);
 app.use("/chat", chatRoute);

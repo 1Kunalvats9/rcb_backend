@@ -3,27 +3,28 @@ import { qdrant, storeDocument } from "../services/qdrant.js";
 import multer from "multer";
 import Document from "../models/documentModel.js";
 import dotenv from "dotenv";
+import { randomUUID } from "crypto";
 
 dotenv.config();
 
-// Lazy load pdf-parse using dynamic import from CommonJS wrapper
-let pdfParsePromise = null;
+// Use dynamic import to load pdf-parse via CommonJS wrapper
+let pdfParse = null;
+
 async function getPdfParse() {
-  if (!pdfParsePromise) {
-    pdfParsePromise = import("../utils/pdfParser.cjs").then((module) => {
-      // CommonJS modules imported in ES modules have a default property
-      // Try multiple possible locations
-      const pdfParse = module.default || module.default?.default || module;
-      
-      if (typeof pdfParse !== 'function') {
-        console.error('Failed to load pdfParse. Module structure:', Object.keys(module));
-        throw new Error('pdfParse is not a function after import');
-      }
-      
-      return pdfParse;
-    });
+  if (!pdfParse) {
+    const pdfParserModule = await import("../utils/pdfParser.cjs");
+    // The wrapper exports pdfParse as default
+    const imported = pdfParserModule.default;
+    
+    // Handle the export - it should be the function from the wrapper
+    if (typeof imported === 'function') {
+      pdfParse = imported;
+    } else {
+      // Fallback: try to get it from the module structure
+      throw new Error(`pdf-parse not available. Got type: ${typeof imported}`);
+    }
   }
-  return pdfParsePromise;
+  return pdfParse;
 }
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -42,7 +43,17 @@ export async function ingest(req, res) {
 export async function pdfIngest(req, res) {
   try {
     // Multer handled in route
+    console.log("[PDF Ingest] Request received");
+    console.log("[PDF Ingest] File:", req.file ? {
+      fieldname: req.file.fieldname,
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    } : "No file");
+    console.log("[PDF Ingest] User:", req.user);
+    
     if (!req.file) {
+      console.log("[PDF Ingest] No file in request");
       return res.status(400).json({ error: "No PDF file uploaded." });
     }
 
@@ -55,21 +66,16 @@ export async function pdfIngest(req, res) {
       return res.status(401).json({ error: "User not authenticated." });
     }
 
-    // Extract text
-    const pdfParse = await getPdfParse();
-    
-    // Debug: Check if pdfParse is actually a function
-    if (typeof pdfParse !== 'function') {
-      console.error('pdfParse is not a function. Type:', typeof pdfParse);
-      console.error('pdfParse value:', pdfParse);
-      throw new Error(`pdfParse is not a function, got ${typeof pdfParse}`);
-    }
-    
-    const pdfData = await pdfParse(req.file.buffer);
+    // Extract text from PDF
+    console.log("[PDF Ingest] Starting PDF parsing...");
+    const pdfParseFn = await getPdfParse();
+    const pdfData = await pdfParseFn(req.file.buffer);
+    console.log("[PDF Ingest] PDF parsed successfully");
     const fullText = pdfData.text?.trim() || "";
     if (!fullText) {
       return res.status(400).json({ error: "PDF contains no extractable text." });
     }
+    console.log(`[PDF Ingest] Extracted ${fullText.length} characters from PDF`);
 
     // Chunking
     const CHUNK_SIZE = 1600;
@@ -88,15 +94,18 @@ export async function pdfIngest(req, res) {
     if (chunks.length === 0) {
       return res.status(400).json({ error: "No chunks produced from PDF." });
     }
+    console.log(`[PDF Ingest] Created ${chunks.length} chunks`);
 
     // Create embeddings + points
     const now = Date.now();
     const points = [];
+    console.log("[PDF Ingest] Starting embedding generation...");
 
     for (let i = 0; i < chunks.length; i++) {
+      console.log(`[PDF Ingest] Processing chunk ${i + 1}/${chunks.length}`);
       const vector = await embedText(chunks[i]);
       points.push({
-        id: `${userId}_pdf_${now}_${i}`,
+        id: randomUUID(), // Qdrant requires UUID or unsigned integer
         vector,
         payload: {
           userId,
@@ -108,11 +117,15 @@ export async function pdfIngest(req, res) {
         },
       });
     }
+    console.log("[PDF Ingest] All embeddings generated");
 
     // Upsert to Qdrant
+    console.log("[PDF Ingest] Upserting to Qdrant...");
     await qdrant.upsert(process.env.COLLECTION_NAME, { points });
+    console.log("[PDF Ingest] Qdrant upsert complete");
 
     // Save metadata
+    console.log("[PDF Ingest] Saving document metadata...");
     const doc = await Document.create({
       userId,
       fileName: req.file.originalname,
@@ -121,6 +134,7 @@ export async function pdfIngest(req, res) {
       uploadedAt: new Date(),
       source: "pdf",
     });
+    console.log("[PDF Ingest] Document saved with ID:", doc._id);
 
     res.json({
       success: true,

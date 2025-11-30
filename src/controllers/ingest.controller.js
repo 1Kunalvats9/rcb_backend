@@ -1,13 +1,14 @@
 import { embedText } from "../services/embedding.js";
-import { qdrant } from "../services/qdrant.js";
-import * as pdfParseModule from "pdf-parse";
+import { qdrant, storeDocument } from "../services/qdrant.js";
 import multer from "multer";
 import Document from "../models/documentModel.js";
 import dotenv from "dotenv";
+import { createRequire } from "module";
 
 dotenv.config();
 
-const pdfParse = pdfParseModule.default || pdfParseModule;
+const require = createRequire(import.meta.url);
+const pdfParse = require("pdf-parse");
 const upload = multer({ storage: multer.memoryStorage() });
 
 export async function ingest(req, res) {

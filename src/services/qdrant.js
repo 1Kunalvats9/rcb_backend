@@ -1,5 +1,6 @@
 import { QdrantClient } from "@qdrant/qdrant-js";
 import dotenv from "dotenv";
+import { embedText } from "./embedding.js";
 dotenv.config();
 
 let qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
@@ -56,4 +57,10 @@ export async function searchDocs(embedding) {
     text: r.payload?.text || '',
     score: r.score,
   }));
+}
+
+export async function getContextFromQdrant(query) {
+  const embedding = await embedText(query);
+  const docs = await searchDocs(embedding);
+  return docs.map((doc) => doc.text);
 }

@@ -4,23 +4,48 @@ import User from "../models/userModel.js";
 import { OAuth2Client } from "google-auth-library";
 
 const router = express.Router();
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Support multiple client IDs (comma-separated in env var)
+// Example: GOOGLE_CLIENT_ID="ios-client-id,web-client-id,android-client-id"
+// This allows iOS, Android, and Web clients to use different client IDs
+const getClientIds = () => {
+  const clientIdEnv = process.env.GOOGLE_CLIENT_ID || '';
+  if (!clientIdEnv) return [];
+  
+  if (clientIdEnv.includes(',')) {
+    return clientIdEnv.split(',').map(id => id.trim()).filter(Boolean);
+  }
+  return [clientIdEnv];
+};
 
 router.post("/google", async (req, res) => {
   try {
-    const { id_token } = req.body;
+    const { id_token, client_id } = req.body;
 
     if (!id_token) {
       return res.status(400).json({ error: "Missing id_token" });
     }
 
     // 1. Verify Google Token
+    // Get all configured client IDs from environment
+    const configuredClientIds = getClientIds();
+    let audience;
+    if (client_id) {
+      audience = [...new Set([client_id, ...configuredClientIds])];
+    } else if (configuredClientIds.length > 0) {
+      audience = configuredClientIds.length === 1 ? configuredClientIds[0] : configuredClientIds;
+    } else {
+      return res.status(500).json({ error: "Google Client ID not configured" });
+    }
+
+    const client = new OAuth2Client();
     const ticket = await client.verifyIdToken({
       idToken: id_token,
-      audience: process.env.GOOGLE_CLIENT_ID
+      audience: audience
     });
-
+    
     const payload = ticket.getPayload();
+
     const { sub, email, name, picture } = payload;
 
     // 2. Check / Create user in DB
@@ -57,7 +82,15 @@ router.post("/google", async (req, res) => {
 
   } catch (err) {
     console.error("Google Auth Error:", err);
-    res.status(500).json({ error: "Auth failed" });
+    
+    // Provide more specific error messages
+    if (err.message && err.message.includes("Wrong recipient")) {
+      return res.status(401).json({ 
+        error: "Invalid token: Client ID mismatch. Make sure your iOS client ID is added to GOOGLE_CLIENT_ID environment variable (comma-separated)." 
+      });
+    }
+    
+    res.status(500).json({ error: "Auth failed", details: err.message });
   }
 });
 
